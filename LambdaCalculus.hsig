@@ -1,0 +1,116 @@
+type Var = String
+
+--Lambda Calculus Terms
+data Term =
+    Variable Var
+  | Lambda   Var  Term
+  | Apply    Term Term
+--  deriving Show
+
+
+instance Show Term where
+  show = pretty
+
+example :: Term
+example = Lambda "a" (Lambda "x" (Apply (Apply (Lambda "y" (Variable "a")) (Variable "x")) (Variable "b")))
+test :: Term
+test = Lambda "a" (Lambda "x" (Apply (Apply (Lambda "y" (Variable "a")) (Variable "x")) (Variable "b")))
+
+pretty :: Term -> String
+pretty = f 0
+    where
+      f i (Variable x) = x
+      f i (Lambda x m) = if i /= 0 then "(" ++ s ++ ")" else s where s = "\\" ++ x ++ ". " ++ f 0 m 
+      f i (Apply  n m) = if i == 2 then "(" ++ s ++ ")" else s where s = f 1 n ++ " " ++ f 2 m
+
+
+-- Church Numerals
+numeral :: Int -> Term
+numeral i = Lambda "f" (Lambda "x" (n' i))
+    where n' j
+            | j == 0 = Variable "x"
+            | otherwise = Apply (Variable "f") (n' (j-1))
+
+-- Create Infinite List of Variables ['a',...,'z', 'a1,...,z1' etc.]
+variables :: [Var]
+variables = alphabet ++ [(j ++ (show i)) | i <- [1..], j <- alphabet]
+    where   abc = ['a'..'z']
+            alphabet = [[abc!!(k)] | k <- [0..((length abc)-1)]]
+
+-- Filter a list of Variables
+filterVariables :: [Var] -> [Var] -> [Var]
+filterVariables [] _ = []
+filterVariables xs [] = xs
+filterVariables (x:xs) (y:ys)
+    | elem x (y:ys) = filterVariables xs (y:ys)
+    | otherwise = x : filterVariables xs (y:ys)
+
+-- Get a Fresh Variable
+fresh :: [Var] -> Var
+fresh xs = (filterVariables variables xs)!!0
+
+-- Get list of used Variables
+used :: Term -> [Var]
+used (Variable t)   = [t]
+used (Lambda v t)   = merge [v] (used t)
+used (Apply t1 t2)  = merge (used t1) (used t2)
+
+-- Rename
+rename :: Var -> Var -> Term -> Term
+rename x y (Variable z)
+    | z == x    = Variable y
+    | otherwise = Variable z
+rename x y (Lambda z n)
+    | z == x    = Lambda z n
+    | otherwise = Lambda z (rename x y n)
+rename x y (Apply  n m) = Apply (rename x y n) (rename x y m)
+
+-- Substitute
+substitute :: Var -> Term -> Term -> Term
+substitute x n (Variable y)
+    | y == x    = n
+    | otherwise = Variable y
+substitute x n (Lambda y m)
+    | y == x    = Lambda y m
+    | otherwise = Lambda z (substitute x n (rename y z m))
+    where z = fresh ((used n)++(used m)++[x])
+substitute x n (Apply m1 m2) = Apply (substitute x n m1) (substitute x n m2)
+
+-- Beta Reduction
+beta :: Term -> [Term]
+beta (Apply (Lambda x n) m) = [substitute x m n] ++ [Apply (Lambda x bn) m | bn <- (beta n)] ++ [Apply (Lambda x n) bm | bm <- (beta m)]
+beta (Apply n m) = [Apply bn m | bn <- (beta n)] ++ [Apply n bm | bm <- (beta m)]
+beta (Lambda n m) = [Lambda n bm | bm <- (beta m)]
+beta (Variable z) = []
+
+-- Reduce a Term to Normal Form
+normalize :: Term -> IO ()
+normalize x = do
+    putStrLn (show x)
+    let b = (beta x)
+    if (length b) > 0 then do
+        normalize ((head b))
+    else do
+        return ()
+
+-- Applicative Order Beta Reduction
+a_beta :: Term -> [Term]
+a_beta (Apply (Lambda x n) m) =  [Apply (Lambda x bn) m | bn <- (a_beta n)] ++ [Apply (Lambda x n) bm | bm <- (a_beta m)] ++ [substitute x m n]
+a_beta (Apply n m) =  [Apply n bm | bm <- (a_beta m)] ++ [Apply bn m | bn <- (a_beta n)]
+a_beta (Lambda n m) = [Lambda n bm | bm <- (a_beta m)]
+a_beta (Variable z) = []
+
+--Applicative Order Normalization
+a_normalize :: Term -> IO ()
+a_normalize x = do
+    putStrLn (show x)
+    let b = (a_beta x)
+    if (length b) > 0 then do
+        a_normalize ((head b))
+    else do
+        return ()
+
+example1 :: Term
+example1 = (Apply (numeral 2) (numeral 2))
+example2 :: Term
+example2 = (Apply (Lambda "x" (Variable "y")) (Apply (Lambda "x" (Apply (Variable "x") (Variable "x"))) (Lambda "x" (Apply (Variable "x") (Variable "y")))))

@@ -1,0 +1,74 @@
+data Env = Env [(Var, Term, Env)]
+data State = State (Term, Env, [(Term, Env)])
+
+instance Show Env where
+    show = pretty'
+    
+pretty' :: Env -> String
+pretty' (Env ((v, t, e):es)) = "[(" ++ (show v) ++ "," ++ (show t) ++ "," ++ (pretty' e) ++ ")" ++ (pretty'' (Env es)) ++ "]"
+pretty' (Env []) = "[]"
+
+--Multiple Environments
+pretty'' :: Env -> String
+pretty'' (Env []) = ""
+pretty'' (Env ((v, t, e):es))
+    | null es = ",(" ++ (show v) ++ "," ++ (show t) ++ "," ++ (show e) ++ ")"
+    | otherwise = ",(" ++ (show v) ++ "," ++ (show t) ++ "," ++ (pretty' e) ++ ")" ++ (pretty'' (Env es))
+
+instance Show State where
+    show = pretty'''
+    
+pretty''' :: State -> String
+pretty''' (State (t, (Env e), cs)) = "(" ++ (show t) ++ "," ++ (show (Env e)) ++ "," ++ (show cs) ++ ")"
+
+state1 = (Lambda "x" (Lambda "y" (Variable "x")) , [Variable "Yes", Variable "No"])
+state2 = State ((Apply (Lambda "x" (Variable "x")) (Variable "y")), Env [("y", Lambda "z" (Variable "z"), Env [])], [])
+state3 = State ((Apply (Variable "x") (Variable "x")), (Env [(("x"), (Lambda "x" (Apply (Variable "x") (Variable "x"))), Env [])]), [])
+state4 = State ((Lambda "y" (Variable "x")), Env [], [((Variable "z"), Env [("z", (Lambda "a" (Variable "b")), Env [("b", Variable "c", Env [])])])])
+term1 = Apply (Apply (Lambda "x" (Lambda "y" (Variable "x"))) (Variable "Yes")) (Variable "No")
+term2 = Apply (Apply (Lambda "b" (Apply example (Variable "Yes"))) (Lambda "z" (Variable "z"))) (Variable "No")
+
+start :: Term -> State
+start t = State (t, (Env []), [])
+
+step :: State -> State
+step (State (Variable x, Env ((y, n, Env f) : e), s))
+    | x == y = State (n, Env f, s)
+    | otherwise = State ((Variable x), Env e , s)
+step (State ((Lambda x n), Env e, (m, Env f):s)) = State (n, Env ((x, m, Env f) : e), s)
+step (State ((Apply n m), Env e, s)) = State (n, Env e, ((m, Env e) : s))
+    
+final :: State -> Bool
+final (State (Lambda x n, Env e, [])) = True
+final (State (Variable x, Env [], s)) = True
+final (State _) = False
+
+run :: Term -> IO ()
+run t = do
+    let x = start t
+    loop x
+    
+loop :: State -> IO ()
+loop s = do
+    putStrLn (show s)
+    if (final (s)) then do putStrLn (show (readback s))
+    else do loop (step s)
+    
+readback :: State -> Term
+readback (State (x, e, ((t, e1):ss))) = applyListOfClosures (stateToListOfClosures ((State (x, e, ((t, e1):ss)))))
+readback (State (x, e, s)) = readback' (State (x, e, s))
+
+stateToListOfClosures :: State -> [(Term, Env)]
+stateToListOfClosures (State (t, e, c)) = [(t, e)] ++ c
+
+applyListOfClosures :: [(Term, Env)] -> Term
+applyListOfClosures ((t1, e1):(t2, e2):[]) = Apply (readback' (State (t1, e1, []))) (readback' (State (t2, e2, [])))
+applyListOfClosures cs = Apply (applyListOfClosures (init cs)) (readback' (State (fst (last cs), snd (last cs), [])))
+
+readback' :: State -> Term
+readback' (State (Variable x, Env [], s)) = (Variable x)
+readback' (State ((Variable x), Env ((y, n, Env e) : f), s))
+   | x == y    = readback' (State (n, Env e, s))
+   | otherwise = readback' (State ((Variable x), Env f, s))
+readback' (State ((Lambda x n), Env e, s)) = Lambda x (readback' (State (n, Env ((x, Variable x, Env []) : e), s)))
+readback' (State (Apply n m, Env e, s)) = Apply (readback' (State (n, Env e, s))) (readback' (State (m, Env e, s)))
